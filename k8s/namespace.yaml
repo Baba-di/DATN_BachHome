@@ -1,0 +1,8 @@
+# Kubernetes Namespace for BachHome
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bachhome
+  labels:
+    app: bachhome
+    environment: production

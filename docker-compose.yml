@@ -1,0 +1,371 @@
+version: '3.8'
+
+services:
+  # RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "25672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - bachhome-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Eureka Server
+  eureka-server:
+    build:
+      context: ./eureka-server
+      dockerfile: Dockerfile
+    container_name: eureka-server
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      - "8761:8761"
+    networks:
+      - bachhome-network
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Giờ Việt Nam cho Java (LocalDateTime.now()) và cho phiên kết nối PostgreSQL.
+      # Thiếu dòng này thì container chạy theo giờ UTC, thời gian lưu bị chậm 7 tiếng.
+      TZ: Asia/Ho_Chi_Minh
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      - eureka-server
+    networks:
+      - bachhome-network
+
+  # Auth Service
+  postgres-auth:
+    image: postgres:15-alpine
+    container_name: postgres-auth
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bachhome_auth
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 10112004
+    ports:
+      - "15438:5432"
+    volumes:
+      - postgres-auth-data:/var/lib/postgresql/data
+    networks:
+      - bachhome-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  service-auth:
+    build:
+      context: ./service-auth
+      dockerfile: Dockerfile
+    container_name: service-auth
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      # Giờ Việt Nam cho Java (LocalDateTime.now()) và cho phiên kết nối PostgreSQL.
+      # Thiếu dòng này thì container chạy theo giờ UTC, thời gian lưu bị chậm 7 tiếng.
+      TZ: Asia/Ho_Chi_Minh
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-auth:5432/bachhome_auth
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: 10112004
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    networks:
+      - bachhome-network
+
+  # Product Service
+  postgres-product:
+    image: postgres:15-alpine
+    container_name: postgres-product
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bachhome_product
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 10112004
+    ports:
+      - "15433:5432"
+    volumes:
+      - postgres-product-data:/var/lib/postgresql/data
+    networks:
+      - bachhome-network
+
+  service-product:
+    build:
+      context: ./service-product
+      dockerfile: Dockerfile
+    container_name: service-product
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    environment:
+      # Giờ Việt Nam cho Java (LocalDateTime.now()) và cho phiên kết nối PostgreSQL.
+      # Thiếu dòng này thì container chạy theo giờ UTC, thời gian lưu bị chậm 7 tiếng.
+      TZ: Asia/Ho_Chi_Minh
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-product:5432/bachhome_product
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: 10112004
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      - postgres-product
+      - eureka-server
+    networks:
+      - bachhome-network
+
+  # Order Service
+  postgres-order:
+    image: postgres:15-alpine
+    container_name: postgres-order
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bachhome_order
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 10112004
+    ports:
+      - "15434:5432"
+    volumes:
+      - postgres-order-data:/var/lib/postgresql/data
+    networks:
+      - bachhome-network
+
+  service-order:
+    build:
+      context: ./service-order
+      dockerfile: Dockerfile
+    container_name: service-order
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      # Giờ Việt Nam cho Java (LocalDateTime.now()) và cho phiên kết nối PostgreSQL.
+      # Thiếu dòng này thì container chạy theo giờ UTC, thời gian lưu bị chậm 7 tiếng.
+      TZ: Asia/Ho_Chi_Minh
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-order:5432/bachhome_order
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: 10112004
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      postgres-order:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    networks:
+      - bachhome-network
+
+  # Payment Service
+  postgres-payment:
+    image: postgres:15-alpine
+    container_name: postgres-payment
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bachhome_payment
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 10112004
+    ports:
+      - "15435:5432"
+    volumes:
+      - postgres-payment-data:/var/lib/postgresql/data
+    networks:
+      - bachhome-network
+
+  service-payment:
+    build:
+      context: ./service-payment
+      dockerfile: Dockerfile
+    container_name: service-payment
+    restart: unless-stopped
+    ports:
+      - "8084:8084"
+    environment:
+      # Giờ Việt Nam cho Java (LocalDateTime.now()) và cho phiên kết nối PostgreSQL.
+      # Thiếu dòng này thì container chạy theo giờ UTC, thời gian lưu bị chậm 7 tiếng.
+      TZ: Asia/Ho_Chi_Minh
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-payment:5432/bachhome_payment
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: 10112004
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      # Tài khoản nhận tiền cho mã QR. Giá trị thật đặt trong file .env (đã .gitignore),
+      # không ghi thẳng vào đây để khỏi lộ số tài khoản khi đẩy code lên.
+      SEPAY_BANK_ACCOUNT_NUMBER: ${SEPAY_BANK_ACCOUNT_NUMBER:-}
+      SEPAY_BANK_CODE: ${SEPAY_BANK_CODE:-Vietcombank}
+      SEPAY_ACCOUNT_NAME: ${SEPAY_ACCOUNT_NAME:-}
+    depends_on:
+      - postgres-payment
+      - eureka-server
+    networks:
+      - bachhome-network
+
+  # Inventory Service
+  postgres-inventory:
+    image: postgres:15-alpine
+    container_name: postgres-inventory
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bachhome_inventory
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 10112004
+    ports:
+      - "15436:5432"
+    volumes:
+      - postgres-inventory-data:/var/lib/postgresql/data
+    networks:
+      - bachhome-network
+
+  service-inventory:
+    build:
+      context: ./service-inventory
+      dockerfile: Dockerfile
+    container_name: service-inventory
+    restart: unless-stopped
+    ports:
+      - "8085:8085"
+    environment:
+      # Giờ Việt Nam cho Java (LocalDateTime.now()) và cho phiên kết nối PostgreSQL.
+      # Thiếu dòng này thì container chạy theo giờ UTC, thời gian lưu bị chậm 7 tiếng.
+      TZ: Asia/Ho_Chi_Minh
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-inventory:5432/bachhome_inventory
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: 10112004
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      postgres-inventory:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    networks:
+      - bachhome-network
+
+  # Notification Service
+  postgres-notification:
+    image: postgres:15-alpine
+    container_name: postgres-notification
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bachhome_notification
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 10112004
+    ports:
+      - "15437:5432"
+    volumes:
+      - postgres-notification-data:/var/lib/postgresql/data
+    networks:
+      - bachhome-network
+
+  service-socket:
+    build: ./service-socket
+    container_name: service-socket
+    restart: unless-stopped
+    ports:
+      - "8089:8089"
+    environment:
+      # Giờ Việt Nam cho Java (LocalDateTime.now()) và cho phiên kết nối PostgreSQL.
+      # Thiếu dòng này thì container chạy theo giờ UTC, thời gian lưu bị chậm 7 tiếng.
+      - TZ=Asia/Ho_Chi_Minh
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://eureka-server:8761/eureka/
+    depends_on:
+      eureka-server:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - bachhome-network
+
+  service-notification:
+    build:
+      context: ./service-notification
+      dockerfile: Dockerfile
+    container_name: service-notification
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      # Giờ Việt Nam cho Java (LocalDateTime.now()) và cho phiên kết nối PostgreSQL.
+      # Thiếu dòng này thì container chạy theo giờ UTC, thời gian lưu bị chậm 7 tiếng.
+      TZ: Asia/Ho_Chi_Minh
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-notification:5432/bachhome_notification
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: 10112004
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      postgres-notification:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    networks:
+      - bachhome-network
+
+  # AI Service (Chatbot tư vấn sản phẩm)
+  service-ai:
+    build:
+      context: ./service-ai
+      dockerfile: Dockerfile
+    container_name: service-ai
+    restart: unless-stopped
+    ports:
+      - "8087:8087"
+    environment:
+      # Giờ Việt Nam cho Java (LocalDateTime.now()) và cho phiên kết nối PostgreSQL.
+      # Thiếu dòng này thì container chạy theo giờ UTC, thời gian lưu bị chậm 7 tiếng.
+      TZ: Asia/Ho_Chi_Minh
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      - eureka-server
+    networks:
+      - bachhome-network
+
+volumes:
+  postgres-auth-data:
+  postgres-product-data:
+  postgres-order-data:
+  postgres-payment-data:
+  postgres-inventory-data:
+  postgres-notification-data:
+  rabbitmq-data:
+
+networks:
+  bachhome-network:
+    driver: bridge
